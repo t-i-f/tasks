@@ -1,0 +1,44 @@
+version: '3'
+
+tasks:
+  default:
+    desc: "Auto-init HeroUI. Usage: task init -- [name] (Defaults to 'my-app')"
+    cmds:
+      - |
+        cat <<'EOF' > .init_script.exp
+        #!/usr/bin/expect
+        
+        # 1. GET ARGUMENT
+        set project_name [lindex $argv 0]
+
+        # 2. DEFAULT LOGIC (The Fix)
+        # If the argument is empty string "", set it to default
+        if {$project_name == ""} { 
+            set project_name "my-app"
+            send_user "No name provided. Defaulting to '$project_name'...\n"
+        }
+
+        set timeout 20
+        spawn bunx heroui-cli@latest init -p bun -t vite
+
+        # 3. INTERACTION
+        # Select Template
+        expect "Select a template"
+        send "\r"
+
+        # Enter Name (Clear line + Type Variable)
+        expect "New project name"
+        send "\001" ; # Ctrl+A (Start)
+        send "\013" ; # Ctrl+K (Kill/Delete)
+        send "$project_name\r"
+
+        # Select Manager
+        expect "Select a package manager"
+        send "\r"
+
+        expect eof
+        EOF
+
+      # Pass the CLI args (wrapped in quotes to handle empty case)
+      - expect .init_script.exp "{{.CLI_ARGS}}"
+      - rm .init_script.exp

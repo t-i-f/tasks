@@ -1,0 +1,114 @@
+version: '3'
+
+vars:
+  ENV_FILE: .env.local
+  CALLBACK_ROUTE: app/callback/route.ts
+  SIGNIN_ROUTE: app/sign-in/route.ts
+  SIGNOUT_ROUTE: app/sign-out/route.ts
+  PROXY_FILE: proxy.ts
+  LOGTO_CONFIG: app/logto-config.ts
+  COOKIE_SECRET:
+    sh: openssl rand -hex 32
+
+tasks:
+  default:
+    desc: "Setup Logto"
+    cmds:
+      - bun add @logto/next
+      - task: create-config
+      - task: create-routes
+      - task: create-proxy
+
+  create-config:
+    desc: "Creates app/logto-config.ts and .env.local"
+    cmds:
+      - |
+        cat <<EOF > {{.ENV_FILE}}
+        BASE_URL=http://localhost:3000
+
+        LOGTO_ENDPOINT=
+        LOGTO_APP_ID=
+        LOGTO_APP_SECRET=
+        LOGTO_REDIRECT_URI=http://localhost:3000/callback
+        LOGTO_COOKIE_SECRET={{.COOKIE_SECRET}}
+        EOF
+      - |
+        cat <<EOF > {{.LOGTO_CONFIG}}
+        import { LogtoNextConfig } from '@logto/next';
+
+        export const logtoConfig: LogtoNextConfig = {
+          endpoint: process.env.LOGTO_ENDPOINT!,
+          appId: process.env.LOGTO_APP_ID!,
+          appSecret: process.env.LOGTO_APP_SECRET!,
+          baseUrl: process.env.BASE_URL!,
+          cookieSecret: process.env.LOGTO_COOKIE_SECRET!,
+          cookieSecure: process.env.NODE_ENV === 'production',
+          scopes: ["openid", "profile", "email", "offline_access"],
+        };
+        EOF
+      - echo "✅ Created {{.ENV_FILE}} and {{.LOGTO_CONFIG}}"
+
+  create-routes:
+    desc: "Creates callback, sign-in, sign-out routes"
+    cmds:
+      - mkdir -p "$(dirname "{{.CALLBACK_ROUTE}}")" && mkdir -p "$(dirname "{{.SIGNIN_ROUTE}}")" && mkdir -p "$(dirname "{{.SIGNOUT_ROUTE}}")"
+      - |
+        cat <<EOF > {{.CALLBACK_ROUTE}}
+        import { handleSignIn } from '@logto/next/server-actions';
+        import { redirect } from 'next/navigation';
+        import { NextRequest } from 'next/server';
+        import { logtoConfig } from '@/app/logto-config';
+
+        export async function GET(request: NextRequest) {
+          const searchParams = request.nextUrl.searchParams;
+          await handleSignIn(logtoConfig, searchParams);
+          
+          redirect('/');
+        }
+        EOF
+      - |
+        cat <<EOF > {{.SIGNIN_ROUTE}}
+        import { signIn } from '@logto/next/server-actions';
+        import { logtoConfig } from '@/app/logto-config';
+
+        export async function GET() {
+          return signIn(logtoConfig);
+        }
+        EOF
+      - |
+        cat <<EOF > {{.SIGNOUT_ROUTE}}
+        import { logtoConfig } from '@/app/logto-config';
+        import { signOut } from '@logto/next/server-actions';
+
+        export async function GET() {
+          return signOut(logtoConfig);
+        }
+        EOF
+      - echo "✅ Created {{.CALLBACK_ROUTE}} {{.SIGNIN_ROUTE}} {{.SIGNOUT_ROUTE}}"
+      
+  create-proxy:
+    desc: "Creates proxy.ts"
+    cmds:
+      - |
+        cat <<EOF > {{.PROXY_FILE}}
+        import { NextRequest, NextResponse } from 'next/server';
+        import { getLogtoContext } from '@logto/next/server-actions';
+        import { logtoConfig } from '@/app/logto-config';
+
+        export async function proxy(request: NextRequest) {
+          const { isAuthenticated } = await getLogtoContext(logtoConfig);
+
+          if (!isAuthenticated) {
+            return NextResponse.redirect(new URL('/sign-in', request.url));
+          }
+
+          return NextResponse.next();
+        }
+
+        export const config = {
+          matcher: [
+            '/((?!callback|_next/static|_next/image|favicon.ico|public|sign-in).*)',
+          ],
+        };
+        EOF
+      - echo "✅ Created {{.PROXY_FILE}}"

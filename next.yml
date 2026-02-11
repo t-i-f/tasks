@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Create nextjs project
+    cmds:
+      - bun create next-app@latest --use-bun --yes {{.CLI_ARGS | default "my-app"}}
